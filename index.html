@@ -98,6 +98,7 @@
     .cat-edit { grid-template-columns: 1fr auto; }
     .muted { color: var(--muted); font-size: 0.85rem; }
     .note { background: var(--accent-soft); color: #164F36; border-radius: 12px; padding: 10px 12px; font-size: 0.85rem; margin-bottom: 12px; }
+    .sync-status { color: var(--muted); font-size: 0.85rem; line-height: 1.45; margin: 8px 0 0; word-break: break-word; }
   </style>
 </head>
 <body>
@@ -106,6 +107,7 @@
   <div class="scrim" id="scrim"></div>
   <div class="sheet" id="sheet"></div>
   <div class="toast" id="toast"></div>
+  <script src="sync.js"></script>
   <script>
   const STORAGE_KEY = "budget-app-v1";
   const DEFAULT_CATEGORIES = [
@@ -170,6 +172,30 @@
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state.data));
   }
 
+  function enqueueSync(events) {
+    if (!events || !events.length || !window.BudgetSync) return Promise.resolve();
+    const st = BudgetSync.loadState(localStorage);
+    BudgetSync.enqueue(st, events);
+    BudgetSync.saveState(localStorage, st);
+    return BudgetSync.flush(localStorage, window.fetch.bind(window)).then(refreshSyncStatus).catch(refreshSyncStatus);
+  }
+  function refreshSyncStatus() {
+    const el = $("syncStatus");
+    if (!el || !window.BudgetSync) return;
+    el.textContent = BudgetSync.statusLine(BudgetSync.loadState(localStorage));
+  }
+  function readSyncForm() {
+    const st = BudgetSync.loadState(localStorage);
+    const urlEl = $("syncUrl");
+    const tokenEl = $("syncToken");
+    if (urlEl) st.url = urlEl.value.trim();
+    if (tokenEl) st.token = tokenEl.value.trim();
+    BudgetSync.saveState(localStorage, st);
+    refreshSyncStatus();
+    BudgetSync.flush(localStorage, window.fetch.bind(window)).then(refreshSyncStatus);
+    return st;
+  }
+
   const state = {
     month: currentMonth(),
     data: load(),
@@ -205,6 +231,7 @@
   }
 
   function closeSheet() {
+    if ($("syncUrl") && window.BudgetSync) readSyncForm();
     state.sheet = null;
     $("sheet").classList.remove("on");
     $("scrim").classList.remove("on");
@@ -346,16 +373,20 @@
       const memo = $("fMemo").value.trim();
       if (!amount || amount < 0 || !Number.isFinite(amount)) { toast("金額を入力してください"); return; }
       if (!date) { toast("日付を入力してください"); return; }
+      const updatedAt = new Date().toISOString();
+      let item = existing;
       if (existing) {
         existing.amount = amount;
         existing.date = date;
         existing.categoryId = categoryId;
         existing.memo = memo;
       } else {
-        state.data.expenses.push({ id: uid(), amount, date, categoryId, memo, createdAt: Date.now() });
+        item = { id: uid(), amount, date, categoryId, memo, createdAt: Date.now() };
+        state.data.expenses.push(item);
       }
       if (date.startsWith(state.month) === false) state.month = date.slice(0, 7);
       save();
+      enqueueSync([BudgetSync.expenseUpsert(item, catName(categoryId), updatedAt)]);
       closeSheet();
       render();
       toast(existing ? "支出を更新しました" : "支出を記録しました");
@@ -365,8 +396,11 @@
     const del = $("delExp");
     if (del) del.onclick = () => {
       if (!confirm("この支出を削除しますか？")) return;
-      state.data.expenses = state.data.expenses.filter(x => x.id !== existing.id);
+      const deletedId = existing.id;
+      const updatedAt = new Date().toISOString();
+      state.data.expenses = state.data.expenses.filter(x => x.id !== deletedId);
       save();
+      enqueueSync([BudgetSync.expenseDelete(deletedId, updatedAt)]);
       closeSheet();
       render();
       toast("削除しました");
@@ -407,8 +441,16 @@
         const n = Math.round(Number(inp.value));
         if (Number.isFinite(n) && n > 0) next[inp.dataset.id] = n;
       });
+      const updatedAt = new Date().toISOString();
+      const knownIds = new Set(state.data.categories.map(c => c.id));
+      const beforeKnown = {};
+      Object.keys(monthBudget(ym)).forEach(id => {
+        if (knownIds.has(id)) beforeKnown[id] = monthBudget(ym)[id];
+      });
+      const events = BudgetSync.budgetDiffEvents(ym, beforeKnown, next, catName, updatedAt);
       state.data.budgets[ym] = next;
       save();
+      enqueueSync(events);
       closeSheet();
       render();
       toast("予算を保存しました");
@@ -422,6 +464,7 @@
         <button class="icon-btn" data-del="${c.id}" aria-label="削除">×</button>
       </div>
     `).join("");
+    const syncSaved = BudgetSync.loadState(localStorage);
     openSheet("設定", `
       <div class="field"><label>カテゴリ</label></div>
       ${rows}
@@ -430,14 +473,29 @@
         <button class="btn primary" id="saveCats">カテゴリを保存</button>
       </div>
       <div class="field"><label>データ</label></div>
-      <div class="muted" style="margin-bottom:10px">記録は、このiPhoneの中にだけ保存されます。機種変更の前に書き出しておくと安心です。</div>
+      <div class="muted" style="margin-bottom:10px">記録の本体は、この端末の中に保存されます。機種変更の前に書き出しておくと安心です。</div>
       <div class="actions">
         <button class="btn ghost" id="exportData">書き出す</button>
         <button class="btn ghost" id="importData">読み込む</button>
       </div>
       <input type="file" id="importFile" accept="application/json,.json" hidden>
+      <div class="field" style="margin-top:18px"><label>スプレッドシート連携</label></div>
+      <div class="muted" style="margin-bottom:10px">任意です。URLと合言葉は、この端末の中だけに保存されます。未設定でも、これまでどおり使えます。</div>
+      <div class="field"><label>送信先URL</label><input id="syncUrl" type="url" inputmode="url" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="ウェブアプリのURL" value="${escapeHtml(syncSaved.url)}"></div>
+      <div class="field"><label>合言葉</label><input id="syncToken" type="text" autocapitalize="off" autocorrect="off" spellcheck="false" autocomplete="off" placeholder="合言葉" value="${escapeHtml(syncSaved.token)}"></div>
+      <div class="actions">
+        <button class="btn ghost" id="syncTest">接続テスト</button>
+      </div>
+      <div class="actions">
+        <button class="btn ghost" id="syncAll">全データを送り直す</button>
+      </div>
+      <p class="sync-status" id="syncStatus"></p>
     `);
+    refreshSyncStatus();
+    $("syncUrl").addEventListener("change", readSyncForm);
+    $("syncToken").addEventListener("change", readSyncForm);
     $("addCat").onclick = () => {
+      readSyncForm();
       const name = prompt("新しいカテゴリ名");
       if (!name || !name.trim()) return;
       state.data.categories.push({ id: uid(), name: name.trim() });
@@ -447,19 +505,28 @@
     };
     $("sheet").querySelectorAll("[data-del]").forEach(btn => {
       btn.onclick = () => {
+        readSyncForm();
         const id = btn.getAttribute("data-del");
         if (!confirm("このカテゴリを削除しますか？記録は残りますが、分類名は「不明」になります。")) return;
+        const before = JSON.parse(JSON.stringify(state.data));
+        const updatedAt = new Date().toISOString();
         state.data.categories = state.data.categories.filter(c => c.id !== id);
         save();
+        enqueueSync(BudgetSync.mirrorDiffEvents(before, state.data, updatedAt));
         showSettings();
       };
     });
     $("saveCats").onclick = () => {
+      readSyncForm();
+      const before = JSON.parse(JSON.stringify(state.data));
       $("sheet").querySelectorAll("input[data-id]").forEach(inp => {
         const c = state.data.categories.find(x => x.id === inp.dataset.id);
-        if (c && inp.value.trim()) c.name = inp.value.trim();
+        const nextName = inp.value.trim();
+        if (c && nextName) c.name = nextName;
       });
+      const updatedAt = new Date().toISOString();
       save();
+      enqueueSync(BudgetSync.mirrorDiffEvents(before, state.data, updatedAt));
       closeSheet();
       render();
       toast("カテゴリを保存しました");
@@ -483,8 +550,11 @@
           const data = JSON.parse(String(reader.result));
           if (!Array.isArray(data.categories) || !data.budgets || !Array.isArray(data.expenses)) throw new Error("形式が違います");
           if (!confirm("今の記録を、読み込んだデータで置き換えますか？")) return;
+          const before = state.data;
+          const updatedAt = new Date().toISOString();
           state.data = data;
           save();
+          enqueueSync(BudgetSync.replaceDataEvents(before, state.data, updatedAt));
           closeSheet();
           render();
           toast("読み込みました");
@@ -494,10 +564,63 @@
       };
       reader.readAsText(file);
     };
+    $("syncTest").onclick = testSync;
+    $("syncAll").onclick = resendAll;
+  }
+
+  async function testSync() {
+    const st = readSyncForm();
+    if (!BudgetSync.configured(st)) {
+      toast("送信先URLと合言葉を入力してください");
+      return;
+    }
+    try {
+      const data = await BudgetSync.postEvents(window.fetch.bind(window), BudgetSync.safeUrl(st.url), st.token, [BudgetSync.pingEvent()]);
+      const current = BudgetSync.loadState(localStorage);
+      if (data && data.ok === true && data.pong === true) {
+        current.lastError = "";
+        BudgetSync.saveState(localStorage, current);
+        toast("接続できました");
+      } else {
+        current.lastError = BudgetSync.errorText(data);
+        BudgetSync.saveState(localStorage, current);
+        toast("接続できませんでした");
+      }
+    } catch (e) {
+      const current = BudgetSync.loadState(localStorage);
+      current.lastError = "送信できませんでした";
+      BudgetSync.saveState(localStorage, current);
+      toast("接続できませんでした");
+    }
+    refreshSyncStatus();
+  }
+
+  function resendAll() {
+    const st = readSyncForm();
+    if (!BudgetSync.configured(st)) {
+      toast("送信先URLと合言葉を入力してください");
+      return;
+    }
+    const events = BudgetSync.snapshotEvents(state.data, new Date().toISOString());
+    if (!events.length) {
+      toast("送る記録がありません");
+      return;
+    }
+    enqueueSync(events);
+    toast("送り直しています");
   }
 
   $("scrim").onclick = closeSheet;
   render();
+  BudgetSync.flush(localStorage, window.fetch.bind(window)).then(refreshSyncStatus);
+  window.addEventListener("online", () => {
+    BudgetSync.flush(localStorage, window.fetch.bind(window)).then(refreshSyncStatus);
+  });
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") {
+      BudgetSync.flush(localStorage, window.fetch.bind(window)).then(refreshSyncStatus);
+    }
+  });
 
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker.register("./sw.js").catch(() => {});
