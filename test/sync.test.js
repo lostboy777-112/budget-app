@@ -6,6 +6,7 @@ const path = require("path");
 const vm = require("vm");
 const { spawnSync } = require("child_process");
 const BudgetSync = require("../sync.js");
+const GAS_URL = "https://script.google.com/macros/s/TestDeployment_Id/exec";
 
 function memoryStorage() {
   const map = new Map();
@@ -57,16 +58,17 @@ async function testQueueAndMockServer() {
   const url = `http://127.0.0.1:${port}/exec`;
   const storage = memoryStorage();
   const state = BudgetSync.loadState(storage);
-  state.url = url;
+  state.url = GAS_URL;
   state.token = "test-token";
   const updatedAt = "2026-11-13T00:00:00.000Z";
-  BudgetSync.enqueue(state, [
+  const events = [
     BudgetSync.expenseUpsert(sampleData().expenses[0], "食費", updatedAt),
     BudgetSync.budgetUpsert("2026-11", "食費", 30000, updatedAt)
-  ]);
+  ];
+  BudgetSync.enqueue(state, events);
   BudgetSync.saveState(storage, state);
 
-  await BudgetSync.flush(storage, fetch);
+  await BudgetSync.postEvents(fetch, url, "test-token", events);
   assert.strictEqual(received.length, 1);
   assert.strictEqual(received[0].method, "POST");
   assert.strictEqual(received[0].contentType, "text/plain;charset=utf-8");
@@ -75,6 +77,11 @@ async function testQueueAndMockServer() {
   assert.strictEqual(received[0].body.events[0].qid, undefined);
   assert.strictEqual(received[0].body.events[0].month, "2026-11");
   assert.strictEqual(received[0].body.events[0].category, "食費");
+  await BudgetSync.flush(storage, async (target, opts) => {
+    assert.strictEqual(target, GAS_URL);
+    assert.strictEqual(opts.headers["Content-Type"], "text/plain;charset=utf-8");
+    return { json: async () => ({ ok: true, skipped: 0 }) };
+  });
   const after = BudgetSync.loadState(storage);
   assert.strictEqual(after.queue.length, 0);
   assert.ok(after.lastSyncAt);
@@ -87,7 +94,7 @@ async function testQueueAndMockServer() {
   BudgetSync.enqueue(queued, [BudgetSync.expenseDelete("e1", updatedAt)]);
   queued.token = "wrong";
   BudgetSync.saveState(storage, queued);
-  await BudgetSync.flush(storage, fetch);
+  await BudgetSync.flush(storage, async () => ({ json: async () => ({ ok: false, error: "unauthorized" }) }));
   const kept = BudgetSync.loadState(storage);
   assert.strictEqual(kept.queue.length, 1);
   assert.strictEqual(kept.lastError, "合言葉が一致しません");
@@ -99,7 +106,7 @@ async function testQueueAndMockServer() {
 async function testRetryAndOverlap() {
   const storage = memoryStorage();
   const state = BudgetSync.loadState(storage);
-  state.url = "https://example.com/exec";
+  state.url = GAS_URL;
   state.token = "test-token";
   BudgetSync.enqueue(state, [BudgetSync.expenseDelete("e1", "2026-11-13T00:00:00.000Z")]);
   BudgetSync.saveState(storage, state);
@@ -124,7 +131,7 @@ async function testRetryAndOverlap() {
     return gate.promise.then(() => ({ json: async () => ({ ok: true }) }));
   };
   const again = BudgetSync.loadState(storage);
-  again.url = "https://example.com/exec";
+  again.url = GAS_URL;
   again.token = "test-token";
   BudgetSync.enqueue(again, [BudgetSync.budgetUpsert("2026-11", "食費", 1000, "2026-11-13T01:00:00.000Z")]);
   BudgetSync.saveState(storage, again);
@@ -232,6 +239,7 @@ function testSheets() {
           }
         },
         setValue(value) { this.setValues([[value]]); },
+        setNumberFormat() {},
         getValues() {
           const out = [];
           for (let i = 0; i < nr; i++) {
@@ -302,7 +310,7 @@ function testSheets() {
   delete props.SYNC_TOKEN;
   assert.strictEqual(post({ events: [{ type: "ping" }] }).ok, false);
   props.SYNC_TOKEN = "phrase";
-  assert.deepStrictEqual(post({ events: [{ type: "ping" }] }), { ok: true, pong: true });
+  assert.deepStrictEqual(post({ events: [{ type: "ping" }] }), { ok: true, pong: true, skipped: 0 });
   assert.strictEqual(locks, 0);
 
   const t1 = "2026-11-13T03:00:00.000Z";
@@ -352,11 +360,81 @@ function testSheets() {
   assert.strictEqual(budget.rows.length, 3);
   assert.strictEqual(budget.rows[1][2], 30000);
   assert.strictEqual(budget.rows[2][1], "日用品");
+
+  const hostile = post({
+    events: [{
+      type: "expense_upsert",
+      id: "e9",
+      date: "2026-11-06",
+      month: "2026-11",
+      category: "=cmd|'x",
+      amount: "not-a-number",
+      memo: "+note",
+      updatedAt: t1
+    }, {
+      type: "expense_upsert",
+      id: "bad id",
+      date: "2026-11-06",
+      month: "2026-11",
+      category: "食費",
+      amount: 1,
+      memo: "",
+      updatedAt: t1
+    }, {
+      type: "budget_upsert",
+      month: "2026-13",
+      category: "@sum",
+      amount: 10,
+      updatedAt: t1
+    }]
+  });
+  assert.strictEqual(hostile.ok, true);
+  assert.strictEqual(hostile.skipped, 2);
+  const hostileRow = expense.rows.find((row) => row[0] === "e9");
+  assert.ok(hostileRow);
+  assert.strictEqual(hostileRow[3], "'=cmd|'x");
+  assert.strictEqual(hostileRow[4], 0);
+  assert.strictEqual(hostileRow[5], "'+note");
+  assert.strictEqual(hostileRow[7], false);
+  assert.strictEqual(expense.rows.some((row) => row[0] === "bad id"), false);
+  post({
+    events: [{
+      type: "expense_upsert",
+      id: "e9",
+      date: "2026-11-07",
+      month: "2026-11",
+      category: "=cmd|'x",
+      amount: 50,
+      memo: "+note",
+      updatedAt: t2
+    }, {
+      type: "budget_upsert",
+      month: "2026-11",
+      category: "=食費",
+      amount: 10,
+      updatedAt: t1
+    }, {
+      type: "budget_upsert",
+      month: "2026-11",
+      category: "=食費",
+      amount: 20,
+      updatedAt: t2
+    }]
+  });
+  assert.strictEqual(expense.rows.filter((row) => row[0] === "e9").length, 1);
+  assert.strictEqual(expense.rows.find((row) => row[0] === "e9")[4], 50);
+  assert.strictEqual(budget.rows.filter((row) => row[1] === "'=食費").length, 1);
+  assert.strictEqual(budget.rows.find((row) => row[1] === "'=食費")[2], 20);
+
+  const beforeRows = expense.rows.length;
+  const tooMany = post({ events: Array.from({ length: 501 }, () => ({ type: "ping" })) });
+  assert.deepStrictEqual(tooMany, { ok: false, error: "too many events" });
+  assert.strictEqual(expense.rows.length, beforeRows);
 }
 
 async function testRepoHasNoSecrets() {
   const files = [
-    "index.html", "sync.js", "sw.js", "README.md", "gas/Code.gs", "gas/SETUP.md", "manifest.webmanifest"
+    "index.html", "app.js", "sync.js", "sw.js", "README.md", "gas/Code.gs", "gas/SETUP.md", "manifest.webmanifest"
   ];
   const banned = [/ghp_[A-Za-z0-9]/, /github_pat_[A-Za-z0-9]/, /AIza[0-9A-Za-z_-]{20}/, /SYNC_TOKEN\s*[:=]\s*["'][^"']+["']/];
   for (const file of files) {
@@ -365,12 +443,60 @@ async function testRepoHasNoSecrets() {
   }
   const html = fs.readFileSync(path.join(__dirname, "../index.html"), "utf8");
   assert.ok(html.includes('src="sync.js"'));
-  assert.ok(html.includes("スプレッドシート連携"));
-  assert.ok(html.includes("接続テスト"));
-  assert.ok(html.includes("全データを送り直す"));
+  assert.ok(html.includes('src="app.js"'));
+  assert.strictEqual(html.includes("<script>"), false);
+  assert.ok(html.includes("script-src 'self'"));
+  assert.ok(html.includes("https://script.google.com"));
+  const app = fs.readFileSync(path.join(__dirname, "../app.js"), "utf8");
+  assert.ok(app.includes('type="password"'));
+  assert.ok(app.includes("autocomplete=\"off\""));
+  assert.ok(app.includes("escapeHtml(e.id)"));
+  assert.ok(app.includes("escapeHtml(c.id)"));
+  assert.ok(app.includes("sanitizeImport"));
   const sw = fs.readFileSync(path.join(__dirname, "../sw.js"), "utf8");
-  assert.ok(sw.includes('const CACHE = "budget-app-v2"'));
+  assert.ok(sw.includes('const CACHE = "budget-app-v3"'));
   assert.ok(sw.includes("./sync.js"));
+  assert.ok(sw.includes("./app.js"));
+}
+
+function testUrlAndImport() {
+  assert.strictEqual(BudgetSync.safeUrl(GAS_URL), GAS_URL);
+  assert.strictEqual(BudgetSync.safeUrl("https://script.google.com/macros/s/TestDeployment_Id/exec?x=1"), "");
+  assert.strictEqual(BudgetSync.safeUrl("http://script.google.com/macros/s/TestDeployment_Id/exec"), "");
+  assert.strictEqual(BudgetSync.safeUrl("https://example.com/macros/s/TestDeployment_Id/exec"), "");
+  assert.strictEqual(BudgetSync.safeUrl("https://script.googleusercontent.com/macros/s/TestDeployment_Id/exec"), "");
+  const storage = memoryStorage();
+  const state = BudgetSync.loadState(storage);
+  state.url = "https://example.com/exec";
+  state.token = "test-token";
+  BudgetSync.enqueue(state, [BudgetSync.pingEvent()]);
+  BudgetSync.saveState(storage, state);
+  let called = false;
+  return BudgetSync.flush(storage, () => { called = true; return Promise.resolve({ json: async () => ({ ok: true }) }); })
+    .then((result) => {
+      assert.strictEqual(called, false);
+      assert.strictEqual(result.queue.length, 1);
+      assert.strictEqual(result.lastError, BudgetSync.URL_ERROR);
+      const cleaned = BudgetSync.sanitizeImport({
+        categories: [{ id: "food<script>", name: "食費" }, { id: "ok_id", name: "日用品" }],
+        budgets: { "2026-11": { "food<script>": 1200, "ok_id": "40" }, "bad": { ok_id: 5 } },
+        expenses: [
+          { id: "bad id", amount: "15.2", date: "2026-11-03", categoryId: "food<script>", memo: 12, createdAt: "x" },
+          { id: "e1", amount: -4, date: "2026-02-31", categoryId: "ok_id", memo: "no" }
+        ]
+      });
+      assert.strictEqual(cleaned.categories[1].id, "ok_id");
+      assert.notStrictEqual(cleaned.categories[0].id, "food<script>");
+      assert.ok(/^[A-Za-z0-9_-]{1,64}$/.test(cleaned.categories[0].id));
+      assert.strictEqual(cleaned.budgets["2026-11"][cleaned.categories[0].id], 1200);
+      assert.strictEqual(cleaned.budgets["2026-11"].ok_id, 40);
+      assert.strictEqual(cleaned.budgets.bad, undefined);
+      assert.strictEqual(cleaned.expenses.length, 1);
+      assert.ok(/^[A-Za-z0-9_-]{1,64}$/.test(cleaned.expenses[0].id));
+      assert.strictEqual(cleaned.expenses[0].amount, 15);
+      assert.strictEqual(cleaned.expenses[0].memo, "12");
+      assert.strictEqual(cleaned.expenses[0].categoryId, cleaned.categories[0].id);
+    });
 }
 
 (async function main() {
@@ -379,6 +505,7 @@ async function testRepoHasNoSecrets() {
   await testEventShapes();
   testSheets();
   await testRepoHasNoSecrets();
+  await testUrlAndImport();
   console.log("sync tests passed");
 })().catch((err) => {
   console.error(err);

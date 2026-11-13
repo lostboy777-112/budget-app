@@ -58,11 +58,17 @@
     return copy;
   }
 
+  const URL_ERROR = "送信先URLは https://script.google.com/macros/s/…/exec だけ使えます";
+
   function safeUrl(value) {
     try {
       const url = new URL(String(value || "").trim());
-      if (url.protocol !== "https:" && url.protocol !== "http:") return "";
-      return url.toString();
+      if (url.protocol !== "https:") return "";
+      if (url.username || url.password || url.port || url.search || url.hash) return "";
+      if (url.hostname !== "script.google.com") return "";
+      const match = url.pathname.match(/^\/macros\/s\/([A-Za-z0-9_-]+)\/exec$/);
+      if (!match) return "";
+      return "https://script.google.com/macros/s/" + match[1] + "/exec";
     } catch (e) {
       return "";
     }
@@ -247,6 +253,106 @@
     return "最終送信: " + when + " / 保留 " + state.queue.length + "件 / エラー: " + err;
   }
 
+  const RECORD_ID = /^[A-Za-z0-9_-]{1,64}$/;
+
+  function validRecordId(id) {
+    return typeof id === "string" && RECORD_ID.test(id);
+  }
+
+  function makeId(used) {
+    let id = "";
+    do {
+      id = Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+    } while (used.has(id) || !validRecordId(id));
+    used.add(id);
+    return id;
+  }
+
+  function validCalendarDate(value) {
+    if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+    const y = Number(value.slice(0, 4));
+    const m = Number(value.slice(5, 7));
+    const d = Number(value.slice(8, 10));
+    if (m < 1 || m > 12 || d < 1 || d > 31) return false;
+    const dt = new Date(Date.UTC(y, m - 1, d));
+    return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d;
+  }
+
+  function sanitizeImport(data) {
+    if (!data || typeof data !== "object" || Array.isArray(data)) throw new Error("形式が違います");
+    if (!Array.isArray(data.categories) || !data.budgets || typeof data.budgets !== "object" || Array.isArray(data.budgets) || !Array.isArray(data.expenses)) {
+      throw new Error("形式が違います");
+    }
+    const usedCats = new Set();
+    const idMap = new Map();
+    const categories = [];
+    data.categories.forEach(function (raw) {
+      if (!raw || typeof raw !== "object") return;
+      const rawId = typeof raw.id === "string" ? raw.id : "";
+      let id;
+      if (validRecordId(rawId) && !usedCats.has(rawId)) {
+        id = rawId;
+        usedCats.add(id);
+      } else {
+        id = makeId(usedCats);
+        if (rawId && !validRecordId(rawId) && !idMap.has(rawId)) idMap.set(rawId, id);
+      }
+      let name = typeof raw.name === "string" ? raw.name.trim() : "";
+      if (!name) name = "カテゴリ";
+      if (name.length > 20) name = name.slice(0, 20);
+      categories.push({ id: id, name: name });
+    });
+    function mapCat(rawId) {
+      if (typeof rawId !== "string") return "";
+      if (idMap.has(rawId)) return idMap.get(rawId);
+      if (validRecordId(rawId)) return rawId;
+      return "";
+    }
+    const usedExpenses = new Set();
+    const expenses = [];
+    data.expenses.forEach(function (raw) {
+      if (!raw || typeof raw !== "object") return;
+      if (!validCalendarDate(raw.date)) return;
+      const rawId = typeof raw.id === "string" ? raw.id : "";
+      let id;
+      if (validRecordId(rawId) && !usedExpenses.has(rawId)) {
+        id = rawId;
+        usedExpenses.add(id);
+      } else {
+        id = makeId(usedExpenses);
+      }
+      const amountNum = Number(raw.amount);
+      const amount = Number.isFinite(amountNum) ? Math.max(0, Math.round(amountNum)) : 0;
+      let memo = typeof raw.memo === "string" ? raw.memo : (raw.memo == null ? "" : String(raw.memo));
+      if (memo.length > 200) memo = memo.slice(0, 200);
+      const created = Number(raw.createdAt);
+      expenses.push({
+        id: id,
+        amount: amount,
+        date: raw.date,
+        categoryId: mapCat(raw.categoryId),
+        memo: memo,
+        createdAt: Number.isFinite(created) ? created : Date.now()
+      });
+    });
+    const budgets = {};
+    Object.keys(data.budgets).forEach(function (month) {
+      if (!/^\d{4}-\d{2}$/.test(month) || Number(month.slice(5, 7)) < 1 || Number(month.slice(5, 7)) > 12) return;
+      const src = data.budgets[month];
+      if (!src || typeof src !== "object" || Array.isArray(src)) return;
+      const next = {};
+      Object.keys(src).forEach(function (rawId) {
+        const id = mapCat(rawId);
+        if (!id) return;
+        const n = Number(src[rawId]);
+        if (!Number.isFinite(n) || n <= 0) return;
+        next[id] = Math.round(n);
+      });
+      if (Object.keys(next).length) budgets[month] = next;
+    });
+    return { categories: categories, budgets: budgets, expenses: expenses };
+  }
+
   function postEvents(fetchImpl, url, token, events) {
     return fetchImpl(url, {
       method: "POST",
@@ -266,12 +372,12 @@
     const url = safeUrl(state.url);
     if (!token || !url) {
       if (state.url.trim() && !url) {
-        state.lastError = "送信先URLを確認してください";
+        state.lastError = URL_ERROR;
         saveState(storage, state);
       }
       return Promise.resolve(state);
     }
-    const batch = state.queue.slice();
+    const batch = state.queue.slice(0, 500);
     return postEvents(fetchImpl, url, token, batch).then(function (data) {
       const current = loadState(storage);
       if (data && data.ok === true) {
@@ -302,9 +408,14 @@
     chain = (async function () {
       try {
         do {
-          rerun = false;
-          await flushOnce(storage, fetchImpl);
-        } while (rerun);
+        rerun = false;
+        const before = loadState(storage).queue.length;
+        await flushOnce(storage, fetchImpl);
+        const afterState = loadState(storage);
+        if (!rerun && afterState.queue.length > 0 && afterState.queue.length < before && !afterState.lastError) {
+          rerun = true;
+        }
+      } while (rerun);
       } finally {
         running = false;
       }
@@ -318,8 +429,10 @@
     loadState: loadState,
     saveState: saveState,
     enqueue: enqueue,
+    URL_ERROR: URL_ERROR,
     configured: configured,
     safeUrl: safeUrl,
+    sanitizeImport: sanitizeImport,
     expenseUpsert: expenseUpsert,
     expenseDelete: expenseDelete,
     budgetUpsert: budgetUpsert,
