@@ -1,0 +1,507 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="予算管理">
+  <meta name="theme-color" content="#1F6B4A">
+  <link rel="apple-touch-icon" href="icon-180.png">
+  <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+  <link rel="manifest" href="manifest.webmanifest">
+  <title>予算管理</title>
+  <style>
+    :root {
+      --bg: #F4F1EA;
+      --paper: #FFFcf7;
+      --ink: #1C1B19;
+      --muted: #6B6660;
+      --line: #E6E0D4;
+      --accent: #1F6B4A;
+      --accent-soft: #E4F2EB;
+      --warn: #B86A12;
+      --warn-soft: #F8EBD4;
+      --danger: #B42318;
+      --danger-soft: #F8E4E1;
+      --ok: #1F6B4A;
+      --shadow: 0 8px 24px rgba(28, 27, 25, 0.08);
+      --safe-top: env(safe-area-inset-top, 0px);
+      --safe-bottom: env(safe-area-inset-bottom, 0px);
+      --radius: 16px;
+    }
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body { margin: 0; padding: 0; background: var(--bg); color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP", sans-serif;
+      font-size: 16px; line-height: 1.5; }
+    body { min-height: 100dvh; }
+    button, input, select, textarea { font: inherit; color: inherit; }
+    button { border: 0; background: none; cursor: pointer; }
+    input, select, textarea {
+      width: 100%; background: var(--paper); border: 1px solid var(--line);
+      border-radius: 12px; padding: 12px 14px; font-size: 16px; outline: none;
+    }
+    input:focus, select:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(31,107,74,.15); }
+    .app { max-width: 520px; margin: 0 auto; padding: calc(12px + var(--safe-top)) 16px calc(96px + var(--safe-bottom)); }
+    header.top { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 16px; }
+    .month-nav { display: flex; align-items: center; gap: 4px; }
+    .month-nav h1 { margin: 0; font-size: 1.15rem; font-weight: 700; letter-spacing: 0.02em; min-width: 9.5em; text-align: center; }
+    .icon-btn { width: 40px; height: 40px; border-radius: 12px; background: var(--paper); border: 1px solid var(--line); display: grid; place-items: center; font-size: 18px; }
+    .icon-btn:active { transform: scale(0.97); }
+    .summary { background: var(--accent); color: #fff; border-radius: 20px; padding: 18px 18px 16px; box-shadow: var(--shadow); }
+    .summary .label { opacity: 0.85; font-size: 0.85rem; }
+    .summary .remain { font-size: 2rem; font-weight: 700; letter-spacing: 0.01em; margin: 2px 0 12px; }
+    .summary .remain.over { color: #FFD7D2; }
+    .summary .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .summary .cell { background: rgba(255,255,255,0.12); border-radius: 12px; padding: 10px 12px; }
+    .summary .cell span { display: block; font-size: 0.75rem; opacity: 0.85; }
+    .summary .cell b { font-size: 1.05rem; font-weight: 650; }
+    .section { margin-top: 22px; }
+    .section h2 { margin: 0 0 10px; font-size: 0.95rem; color: var(--muted); font-weight: 650; display: flex; justify-content: space-between; align-items: baseline; }
+    .linkish { color: var(--accent); font-weight: 650; font-size: 0.85rem; }
+    .card { background: var(--paper); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+    .cat { display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; padding: 14px 14px 12px; border-bottom: 1px solid var(--line); }
+    .cat:last-child { border-bottom: 0; }
+    .cat .name { font-weight: 650; }
+    .cat .amt { text-align: right; font-variant-numeric: tabular-nums; }
+    .cat .sub { grid-column: 1 / -1; color: var(--muted); font-size: 0.8rem; display: flex; justify-content: space-between; }
+    .bar { grid-column: 1 / -1; height: 7px; background: #EEE8DC; border-radius: 99px; overflow: hidden; margin-top: 6px; }
+    .bar > i { display: block; height: 100%; background: var(--accent); border-radius: 99px; width: 0; }
+    .bar.warn > i { background: var(--warn); }
+    .bar.danger > i { background: var(--danger); }
+    .exp { display: flex; justify-content: space-between; gap: 12px; padding: 13px 14px; border-bottom: 1px solid var(--line); width: 100%; text-align: left; background: var(--paper); }
+    .exp:last-child { border-bottom: 0; }
+    .exp:active { background: #F6F1E8; }
+    .exp .meta { color: var(--muted); font-size: 0.8rem; }
+    .exp .yen { font-weight: 650; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .empty { padding: 20px 14px; color: var(--muted); text-align: center; }
+    .fab-wrap { position: fixed; left: 0; right: 0; bottom: 0; max-width: 520px; margin: 0 auto; padding: 12px 16px calc(12px + var(--safe-bottom)); background: linear-gradient(to top, var(--bg) 70%, transparent); pointer-events: none; }
+    .fab-wrap .fab { pointer-events: auto; width: 100%; border-radius: 16px; background: var(--accent); color: #fff; font-weight: 700; padding: 15px 16px; font-size: 1.02rem; box-shadow: var(--shadow); }
+    .fab:active { transform: scale(0.99); }
+    .scrim { position: fixed; inset: 0; background: rgba(28,27,25,0.4); display: none; z-index: 20; }
+    .scrim.on { display: block; }
+    .sheet { position: fixed; left: 0; right: 0; bottom: 0; max-width: 520px; margin: 0 auto; background: var(--paper); border-radius: 20px 20px 0 0; padding: 10px 16px calc(16px + var(--safe-bottom)); z-index: 21; transform: translateY(110%); transition: transform .22s ease; max-height: 92dvh; overflow: auto; }
+    .sheet.on { transform: translateY(0); }
+    .handle { width: 40px; height: 5px; background: #D9D2C5; border-radius: 99px; margin: 4px auto 12px; }
+    .sheet h3 { margin: 0 0 14px; font-size: 1.1rem; }
+    .field { margin-bottom: 12px; }
+    .field label { display: block; font-size: 0.8rem; color: var(--muted); margin-bottom: 6px; font-weight: 650; }
+    .actions { display: flex; gap: 8px; margin-top: 8px; }
+    .btn { flex: 1; padding: 13px 12px; border-radius: 14px; font-weight: 700; }
+    .btn.primary { background: var(--accent); color: #fff; }
+    .btn.ghost { background: var(--bg); border: 1px solid var(--line); }
+    .btn.danger { background: var(--danger-soft); color: var(--danger); }
+    .toast { position: fixed; left: 50%; bottom: calc(88px + var(--safe-bottom)); transform: translateX(-50%) translateY(20px); background: var(--ink); color: #fff; padding: 10px 16px; border-radius: 999px; font-size: 0.9rem; opacity: 0; pointer-events: none; transition: .2s ease; z-index: 30; white-space: nowrap; }
+    .toast.on { opacity: 1; transform: translateX(-50%) translateY(0); }
+    .budget-row, .cat-edit { display: grid; grid-template-columns: 1fr 120px; gap: 8px; align-items: center; margin-bottom: 8px; }
+    .cat-edit { grid-template-columns: 1fr auto; }
+    .muted { color: var(--muted); font-size: 0.85rem; }
+    .note { background: var(--accent-soft); color: #164F36; border-radius: 12px; padding: 10px 12px; font-size: 0.85rem; margin-bottom: 12px; }
+  </style>
+</head>
+<body>
+  <div class="app" id="app"></div>
+  <div class="fab-wrap" id="fabWrap"></div>
+  <div class="scrim" id="scrim"></div>
+  <div class="sheet" id="sheet"></div>
+  <div class="toast" id="toast"></div>
+  <script>
+  const STORAGE_KEY = "budget-app-v1";
+  const DEFAULT_CATEGORIES = [
+    { id: "food", name: "食費" },
+    { id: "daily", name: "日用品" },
+    { id: "transit", name: "交通" },
+    { id: "util", name: "光熱費" },
+    { id: "comm", name: "通信" },
+    { id: "fun", name: "娯楽" },
+    { id: "med", name: "医療" },
+    { id: "clothes", name: "衣服" },
+    { id: "other", name: "その他" }
+  ];
+
+  const $ = (id) => document.getElementById(id);
+
+  function jstNow() {
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit",
+      hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23"
+    }).formatToParts(new Date());
+    const g = (t) => parts.find(p => p.type === t).value;
+    return { year: g("year"), month: g("month"), day: g("day") };
+  }
+  function todayStr() {
+    const t = jstNow();
+    return `${t.year}-${t.month}-${t.day}`;
+  }
+  function currentMonth() {
+    const t = jstNow();
+    return `${t.year}-${t.month}`;
+  }
+  function monthLabel(ym) {
+    const [y, m] = ym.split("-");
+    return `${y}年${Number(m)}月`;
+  }
+  function shiftMonth(ym, delta) {
+    const [y, m] = ym.split("-").map(Number);
+    const d = new Date(Date.UTC(y, m - 1 + delta, 1));
+    return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+  }
+  function yen(n) {
+    const v = Math.round(Number(n) || 0);
+    return "¥" + v.toLocaleString("ja-JP");
+  }
+  function uid() {
+    return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+  }
+
+  function load() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        const data = JSON.parse(raw);
+        if (!Array.isArray(data.categories) || !data.budgets || !Array.isArray(data.expenses)) throw new Error("bad");
+        return data;
+      }
+    } catch (e) {}
+    return { categories: DEFAULT_CATEGORIES.map(c => ({ ...c })), budgets: {}, expenses: [] };
+  }
+  function save() {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state.data));
+  }
+
+  const state = {
+    month: currentMonth(),
+    data: load(),
+    sheet: null
+  };
+
+  function catName(id) {
+    const c = state.data.categories.find(x => x.id === id);
+    return c ? c.name : "不明";
+  }
+  function monthBudget(ym) {
+    return state.data.budgets[ym] || {};
+  }
+  function expensesInMonth(ym) {
+    return state.data.expenses
+      .filter(e => e.date && e.date.startsWith(ym))
+      .sort((a, b) => b.date.localeCompare(a.date) || (b.createdAt || 0) - (a.createdAt || 0));
+  }
+  function spentByCategory(ym) {
+    const map = {};
+    for (const e of expensesInMonth(ym)) {
+      map[e.categoryId] = (map[e.categoryId] || 0) + Number(e.amount || 0);
+    }
+    return map;
+  }
+
+  function toast(msg) {
+    const el = $("toast");
+    el.textContent = msg;
+    el.classList.add("on");
+    clearTimeout(toast._t);
+    toast._t = setTimeout(() => el.classList.remove("on"), 1800);
+  }
+
+  function closeSheet() {
+    state.sheet = null;
+    $("sheet").classList.remove("on");
+    $("scrim").classList.remove("on");
+  }
+  function openSheet(title, bodyHtml, footerHtml) {
+    $("sheet").innerHTML = `<div class="handle"></div><h3>${title}</h3>${bodyHtml}${footerHtml || ""}`;
+    $("sheet").classList.add("on");
+    $("scrim").classList.add("on");
+  }
+
+  function render() {
+    const ym = state.month;
+    const budgetMap = monthBudget(ym);
+    const spentMap = spentByCategory(ym);
+    const cats = state.data.categories;
+    let totalBudget = 0;
+    let totalSpent = 0;
+    for (const c of cats) {
+      totalBudget += Number(budgetMap[c.id] || 0);
+      totalSpent += Number(spentMap[c.id] || 0);
+    }
+    // include leftover spent in deleted categories
+    for (const [id, amt] of Object.entries(spentMap)) {
+      if (!cats.some(c => c.id === id)) totalSpent += Number(amt || 0);
+    }
+    const remain = totalBudget - totalSpent;
+    const remainCls = remain < 0 ? "over" : "";
+
+    $("app").innerHTML = `
+      <header class="top">
+        <div class="month-nav">
+          <button class="icon-btn" id="prevM" aria-label="前の月">‹</button>
+          <h1>${monthLabel(ym)}</h1>
+          <button class="icon-btn" id="nextM" aria-label="次の月">›</button>
+        </div>
+        <button class="icon-btn" id="openSettings" aria-label="設定">☰</button>
+      </header>
+      <section class="summary">
+        <div class="label">残りの予算</div>
+        <div class="remain ${remainCls}">${yen(remain)}</div>
+        <div class="row">
+          <div class="cell"><span>今月の予算</span><b>${yen(totalBudget)}</b></div>
+          <div class="cell"><span>使った金額</span><b>${yen(totalSpent)}</b></div>
+        </div>
+      </section>
+      <section class="section">
+        <h2>カテゴリ別 <button class="linkish" id="openBudgets">予算を設定</button></h2>
+        <div class="card" id="catList"></div>
+      </section>
+      <section class="section">
+        <h2>支出の記録</h2>
+        <div class="card" id="expList"></div>
+      </section>
+    `;
+
+    const catList = $("catList");
+    if (!cats.length) {
+      catList.innerHTML = `<div class="empty">カテゴリがありません</div>`;
+    } else {
+      catList.innerHTML = cats.map(c => {
+        const b = Number(budgetMap[c.id] || 0);
+        const s = Number(spentMap[c.id] || 0);
+        const r = b - s;
+        const pct = b > 0 ? Math.min(999, Math.round(s / b * 100)) : (s > 0 ? 100 : 0);
+        const barCls = b > 0 && s > b ? "danger" : (b > 0 && s / b >= 0.8 ? "warn" : "");
+        const width = b > 0 ? Math.min(100, (s / b) * 100) : (s > 0 ? 100 : 0);
+        return `<div class="cat">
+          <div class="name">${escapeHtml(c.name)}</div>
+          <div class="amt">${yen(s)}${b ? " / " + yen(b) : ""}</div>
+          <div class="sub"><span>${b ? "残り " + yen(r) : "予算未設定"}</span><span>${b ? pct + "%" : ""}</span></div>
+          <div class="bar ${barCls}"><i style="width:${width}%"></i></div>
+        </div>`;
+      }).join("");
+    }
+
+    const exps = expensesInMonth(ym);
+    const expList = $("expList");
+    if (!exps.length) {
+      expList.innerHTML = `<div class="empty">まだ支出の記録はありません</div>`;
+    } else {
+      expList.innerHTML = exps.map(e => `
+        <button class="exp" data-id="${e.id}">
+          <div>
+            <div>${escapeHtml(catName(e.categoryId))}${e.memo ? " · " + escapeHtml(e.memo) : ""}</div>
+            <div class="meta">${formatDate(e.date)}</div>
+          </div>
+          <div class="yen">${yen(e.amount)}</div>
+        </button>
+      `).join("");
+    }
+
+    $("fabWrap").innerHTML = `<button class="fab" id="addExp">支出を記録</button>`;
+
+    $("prevM").onclick = () => { state.month = shiftMonth(state.month, -1); render(); };
+    $("nextM").onclick = () => { state.month = shiftMonth(state.month, 1); render(); };
+    $("openSettings").onclick = showSettings;
+    $("openBudgets").onclick = showBudgets;
+    $("addExp").onclick = () => showExpense();
+    expList.querySelectorAll(".exp").forEach(btn => {
+      btn.onclick = () => {
+        const item = state.data.expenses.find(x => x.id === btn.dataset.id);
+        if (item) showExpense(item);
+      };
+    });
+  }
+
+  function formatDate(iso) {
+    if (!iso) return "";
+    const [y, m, d] = iso.split("-");
+    return `${Number(m)}月${Number(d)}日`;
+  }
+  function escapeHtml(s) {
+    return String(s || "").replace(/[&<>"']/g, ch => ({
+      "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+    }[ch]));
+  }
+
+  function showExpense(existing) {
+    const cats = state.data.categories;
+    if (!cats.length) { toast("先にカテゴリを追加してください"); showSettings(); return; }
+    const e = existing || { date: todayStr(), categoryId: cats[0].id, amount: "", memo: "" };
+    const options = cats.map(c => `<option value="${c.id}" ${c.id === e.categoryId ? "selected" : ""}>${escapeHtml(c.name)}</option>`).join("");
+    const delBtn = existing ? `<button class="btn danger" id="delExp">削除</button>` : `<button class="btn ghost" id="cancelSheet">やめる</button>`;
+    openSheet(existing ? "支出を編集" : "支出を記録", `
+      <div class="field"><label>金額</label><input id="fAmount" type="number" inputmode="numeric" min="0" step="1" value="${e.amount || ""}" placeholder="例: 1200"></div>
+      <div class="field"><label>カテゴリ</label><select id="fCat">${options}</select></div>
+      <div class="field"><label>日付</label><input id="fDate" type="date" value="${e.date || todayStr()}"></div>
+      <div class="field"><label>メモ（任意）</label><input id="fMemo" type="text" maxlength="80" value="${escapeHtml(e.memo || "")}" placeholder="店名など"></div>
+      <div class="actions">
+        ${delBtn}
+        <button class="btn primary" id="saveExp">保存</button>
+      </div>
+    `);
+    $("fAmount").focus();
+    $("saveExp").onclick = () => {
+      const amount = Math.round(Number($("fAmount").value));
+      const date = $("fDate").value;
+      const categoryId = $("fCat").value;
+      const memo = $("fMemo").value.trim();
+      if (!amount || amount < 0 || !Number.isFinite(amount)) { toast("金額を入力してください"); return; }
+      if (!date) { toast("日付を入力してください"); return; }
+      if (existing) {
+        existing.amount = amount;
+        existing.date = date;
+        existing.categoryId = categoryId;
+        existing.memo = memo;
+      } else {
+        state.data.expenses.push({ id: uid(), amount, date, categoryId, memo, createdAt: Date.now() });
+      }
+      if (date.startsWith(state.month) === false) state.month = date.slice(0, 7);
+      save();
+      closeSheet();
+      render();
+      toast(existing ? "支出を更新しました" : "支出を記録しました");
+    };
+    const cancel = $("cancelSheet");
+    if (cancel) cancel.onclick = closeSheet;
+    const del = $("delExp");
+    if (del) del.onclick = () => {
+      if (!confirm("この支出を削除しますか？")) return;
+      state.data.expenses = state.data.expenses.filter(x => x.id !== existing.id);
+      save();
+      closeSheet();
+      render();
+      toast("削除しました");
+    };
+  }
+
+  function showBudgets() {
+    const ym = state.month;
+    const budgetMap = { ...monthBudget(ym) };
+    const rows = state.data.categories.map(c => `
+      <div class="budget-row">
+        <div>${escapeHtml(c.name)}</div>
+        <input type="number" inputmode="numeric" min="0" step="1" data-id="${c.id}" value="${budgetMap[c.id] || ""}" placeholder="0">
+      </div>
+    `).join("");
+    const prev = shiftMonth(ym, -1);
+    const hasPrev = Object.keys(monthBudget(prev)).length > 0;
+    openSheet(`${monthLabel(ym)}の予算`, `
+      ${hasPrev ? `<div class="note"><button class="linkish" id="copyPrev">前月（${monthLabel(prev)}）の予算をコピー</button></div>` : ""}
+      ${rows || `<div class="empty">カテゴリがありません</div>`}
+      <div class="actions">
+        <button class="btn ghost" id="cancelSheet">やめる</button>
+        <button class="btn primary" id="saveBudgets">保存</button>
+      </div>
+    `);
+    const copy = $("copyPrev");
+    if (copy) copy.onclick = () => {
+      const src = monthBudget(prev);
+      $("sheet").querySelectorAll("input[data-id]").forEach(inp => {
+        inp.value = src[inp.dataset.id] || "";
+      });
+      toast("前月の予算を入れました。保存してください");
+    };
+    $("cancelSheet").onclick = closeSheet;
+    $("saveBudgets").onclick = () => {
+      const next = {};
+      $("sheet").querySelectorAll("input[data-id]").forEach(inp => {
+        const n = Math.round(Number(inp.value));
+        if (Number.isFinite(n) && n > 0) next[inp.dataset.id] = n;
+      });
+      state.data.budgets[ym] = next;
+      save();
+      closeSheet();
+      render();
+      toast("予算を保存しました");
+    };
+  }
+
+  function showSettings() {
+    const rows = state.data.categories.map(c => `
+      <div class="cat-edit">
+        <input type="text" maxlength="20" data-id="${c.id}" value="${escapeHtml(c.name)}">
+        <button class="icon-btn" data-del="${c.id}" aria-label="削除">×</button>
+      </div>
+    `).join("");
+    openSheet("設定", `
+      <div class="field"><label>カテゴリ</label></div>
+      ${rows}
+      <div class="actions" style="margin-bottom:16px">
+        <button class="btn ghost" id="addCat">カテゴリを追加</button>
+        <button class="btn primary" id="saveCats">カテゴリを保存</button>
+      </div>
+      <div class="field"><label>データ</label></div>
+      <div class="muted" style="margin-bottom:10px">記録は、このiPhoneの中にだけ保存されます。機種変更の前に書き出しておくと安心です。</div>
+      <div class="actions">
+        <button class="btn ghost" id="exportData">書き出す</button>
+        <button class="btn ghost" id="importData">読み込む</button>
+      </div>
+      <input type="file" id="importFile" accept="application/json,.json" hidden>
+    `);
+    $("addCat").onclick = () => {
+      const name = prompt("新しいカテゴリ名");
+      if (!name || !name.trim()) return;
+      state.data.categories.push({ id: uid(), name: name.trim() });
+      save();
+      showSettings();
+      toast("カテゴリを追加しました");
+    };
+    $("sheet").querySelectorAll("[data-del]").forEach(btn => {
+      btn.onclick = () => {
+        const id = btn.getAttribute("data-del");
+        if (!confirm("このカテゴリを削除しますか？記録は残りますが、分類名は「不明」になります。")) return;
+        state.data.categories = state.data.categories.filter(c => c.id !== id);
+        save();
+        showSettings();
+      };
+    });
+    $("saveCats").onclick = () => {
+      $("sheet").querySelectorAll("input[data-id]").forEach(inp => {
+        const c = state.data.categories.find(x => x.id === inp.dataset.id);
+        if (c && inp.value.trim()) c.name = inp.value.trim();
+      });
+      save();
+      closeSheet();
+      render();
+      toast("カテゴリを保存しました");
+    };
+    $("exportData").onclick = () => {
+      const blob = new Blob([JSON.stringify(state.data, null, 2)], { type: "application/json" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = `budget-${todayStr()}.json`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+      toast("書き出しました");
+    };
+    $("importData").onclick = () => $("importFile").click();
+    $("importFile").onchange = (ev) => {
+      const file = ev.target.files && ev.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          const data = JSON.parse(String(reader.result));
+          if (!Array.isArray(data.categories) || !data.budgets || !Array.isArray(data.expenses)) throw new Error("形式が違います");
+          if (!confirm("今の記録を、読み込んだデータで置き換えますか？")) return;
+          state.data = data;
+          save();
+          closeSheet();
+          render();
+          toast("読み込みました");
+        } catch (err) {
+          toast("読み込めませんでした");
+        }
+      };
+      reader.readAsText(file);
+    };
+  }
+
+  $("scrim").onclick = closeSheet;
+  render();
+
+  if ("serviceWorker" in navigator) {
+    navigator.serviceWorker.register("./sw.js").catch(() => {});
+  }
+  </script>
+</body>
+</html>
