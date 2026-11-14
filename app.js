@@ -188,10 +188,13 @@ function render() {
       const barCls = b > 0 && s > b ? "danger" : (b > 0 && s / b >= 0.8 ? "warn" : "");
       const width = b > 0 ? Math.min(100, (s / b) * 100) : (s > 0 ? 100 : 0);
       return `<div class="cat">
-        <div class="name">${escapeHtml(c.name)}</div>
-        <div class="amt">${yen(s)}${b ? " / " + yen(b) : ""}</div>
-        <div class="sub"><span>${b ? "残り " + yen(r) : "予算未設定"}</span><span>${b ? pct + "%" : ""}</span></div>
-        <div class="bar ${barCls}"><i style="width:${width}%"></i></div>
+        <div class="cat-main">
+          <div class="name">${escapeHtml(c.name)}</div>
+          <div class="amt">${yen(s)}${b ? " / " + yen(b) : ""}</div>
+          <div class="sub"><span>${b ? "残り " + yen(r) : "予算未設定"}</span><span>${b ? pct + "%" : ""}</span></div>
+          <div class="bar ${barCls}"><i style="width:${width}%"></i></div>
+        </div>
+        <button type="button" class="record-btn" data-cat="${escapeHtml(c.id)}" aria-label="${escapeHtml(c.name)}の支出を記録">記録</button>
       </div>`;
     }).join("");
   }
@@ -219,6 +222,13 @@ function render() {
   $("openSettings").onclick = showSettings;
   $("openBudgets").onclick = showBudgets;
   $("addExp").onclick = () => showExpense();
+  catList.querySelectorAll(".record-btn").forEach(btn => {
+    btn.onclick = (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      showExpense(null, btn.dataset.cat);
+    };
+  });
   expList.querySelectorAll(".exp").forEach(btn => {
     btn.onclick = () => {
       const item = state.data.expenses.find(x => x.id === btn.dataset.id);
@@ -238,10 +248,11 @@ function escapeHtml(s) {
   }[ch]));
 }
 
-function showExpense(existing) {
+function showExpense(existing, presetCategoryId) {
   const cats = state.data.categories;
   if (!cats.length) { toast("先にカテゴリを追加してください"); showSettings(); return; }
-  const e = existing || { date: todayStr(), categoryId: cats[0].id, amount: "", memo: "" };
+  const preset = cats.some(c => c.id === presetCategoryId) ? presetCategoryId : cats[0].id;
+  const e = existing || { date: todayStr(), categoryId: preset, amount: "", memo: "" };
     const options = cats.map(c => `<option value="${escapeHtml(c.id)}" ${c.id === e.categoryId ? "selected" : ""}>${escapeHtml(c.name)}</option>`).join("");
   const delBtn = existing ? `<button class="btn danger" id="delExp">削除</button>` : `<button class="btn ghost" id="cancelSheet">やめる</button>`;
   openSheet(existing ? "支出を編集" : "支出を記録", `
