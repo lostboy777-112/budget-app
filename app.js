@@ -88,6 +88,17 @@ function budgetRemainPace(totalBudget, remain, pace) {
   const shown = pct < 0 ? `−${Math.abs(pct)}%` : `${pct}%`;
   return { text: `予算の残り ${shown}`, pct, width, cls };
 }
+function categoryRemainBar(budget, spent, pace) {
+  const b = Number(budget) || 0;
+  const s = Number(spent) || 0;
+  const remain = b - s;
+  if (!(b > 0)) {
+    return { remain, pct: null, width: s > 0 ? 100 : 0, cls: "" };
+  }
+  const pct = Math.max(0, Math.min(100, Math.round(remain / b * 100)));
+  const cls = pace && typeof pace.pct === "number" && pct < pace.pct ? "behind" : "";
+  return { remain, pct, width: pct, cls };
+}
 function yen(n) {
   const v = Math.round(Number(n) || 0);
   return "¥" + v.toLocaleString("ja-JP");
@@ -247,16 +258,13 @@ function render() {
     catList.innerHTML = cats.map(c => {
       const b = Number(budgetMap[c.id] || 0);
       const s = Number(spentMap[c.id] || 0);
-      const r = b - s;
-      const pct = b > 0 ? Math.min(999, Math.round(s / b * 100)) : (s > 0 ? 100 : 0);
-      const barCls = b > 0 && s > b ? "danger" : (b > 0 && s / b >= 0.8 ? "warn" : "");
-      const width = b > 0 ? Math.min(100, (s / b) * 100) : (s > 0 ? 100 : 0);
+      const bar = categoryRemainBar(b, s, pace);
       return `<div class="cat">
         <div class="cat-main">
           <div class="name">${escapeHtml(c.name)}</div>
           <div class="amt">${yen(s)}${b ? " / " + yen(b) : ""}</div>
-          <div class="sub"><span>${b ? "残り " + yen(r) : "予算未設定"}</span><span>${b ? pct + "%" : ""}</span></div>
-          <div class="bar ${barCls}"><i style="width:${width}%"></i></div>
+          <div class="sub"><span>${b ? "残り " + yen(bar.remain) : "予算未設定"}</span><span>${bar.pct == null ? "" : bar.pct + "%"}</span></div>
+          <div class="bar ${bar.cls}"><i style="width:${bar.width}%"></i></div>
         </div>
         <button type="button" class="record-btn" data-cat="${escapeHtml(c.id)}" aria-label="${escapeHtml(c.name)}の支出を記録">記録</button>
       </div>`;
@@ -627,5 +635,5 @@ function boot() {
 if (typeof document !== "undefined" && document.getElementById("scrim")) boot();
 
 if (typeof module !== "undefined" && module.exports) {
-  module.exports = { daysInMonth, monthPace, monthPaceLabel, budgetRemainPace, jstNow, shiftMonth };
+  module.exports = { daysInMonth, monthPace, monthPaceLabel, budgetRemainPace, categoryRemainBar, jstNow, shiftMonth };
 }

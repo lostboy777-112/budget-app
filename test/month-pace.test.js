@@ -2,7 +2,7 @@ const assert = require("assert");
 const fs = require("fs");
 const path = require("path");
 const zlib = require("zlib");
-const { daysInMonth, monthPace, monthPaceLabel, budgetRemainPace, jstNow } = require("../app.js");
+const { daysInMonth, monthPace, monthPaceLabel, budgetRemainPace, categoryRemainBar, jstNow } = require("../app.js");
 
 function on(year, month, day) {
   return {
@@ -120,6 +120,73 @@ function testBudgetComparison() {
   assert.strictEqual(budgetRemainPace(100000, 40000, future).cls, "");
 }
 
+function testCategoryRemainBar() {
+  const current = pace("2026-11", 2026, 11, 17);
+  assert.strictEqual(current.pct, 47);
+
+  const unset = categoryRemainBar(0, 0, current);
+  assert.strictEqual(unset.pct, null);
+  assert.strictEqual(unset.width, 0);
+  assert.strictEqual(unset.cls, "");
+
+  const unsetSpent = categoryRemainBar(0, 1200, current);
+  assert.strictEqual(unsetSpent.pct, null);
+  assert.strictEqual(unsetSpent.width, 100);
+  assert.strictEqual(unsetSpent.cls, "");
+  assert.strictEqual(unsetSpent.remain, -1200);
+
+  const ahead = categoryRemainBar(100000, 38000, current);
+  assert.strictEqual(ahead.pct, 62);
+  assert.strictEqual(ahead.width, 62);
+  assert.strictEqual(ahead.cls, "");
+  assert.strictEqual(ahead.remain, 62000);
+
+  const behind = categoryRemainBar(100000, 60000, current);
+  assert.strictEqual(behind.pct, 40);
+  assert.strictEqual(behind.width, 40);
+  assert.strictEqual(behind.cls, "behind");
+
+  const tied = categoryRemainBar(100, 100 - current.pct, current);
+  assert.strictEqual(tied.pct, current.pct);
+  assert.strictEqual(tied.width, current.pct);
+  assert.strictEqual(tied.cls, "");
+
+  const justUnder = categoryRemainBar(100, 100 - (current.pct - 1), current);
+  assert.strictEqual(justUnder.pct, current.pct - 1);
+  assert.strictEqual(justUnder.cls, "behind");
+
+  const over = categoryRemainBar(100000, 120000, current);
+  assert.strictEqual(over.pct, 0);
+  assert.strictEqual(over.width, 0);
+  assert.strictEqual(over.cls, "behind");
+  assert.strictEqual(over.remain, -20000);
+
+  const past = pace("2026-10", 2026, 11, 17);
+  assert.strictEqual(past.pct, 0);
+  assert.strictEqual(categoryRemainBar(10000, 15000, past).cls, "");
+  assert.strictEqual(categoryRemainBar(10000, 15000, past).pct, 0);
+  assert.strictEqual(categoryRemainBar(10000, 4000, past).pct, 60);
+  assert.strictEqual(categoryRemainBar(10000, 4000, past).cls, "");
+
+  const future = pace("2026-12", 2026, 11, 17);
+  assert.strictEqual(future.pct, 100);
+  const futureFull = categoryRemainBar(10000, 0, future);
+  assert.strictEqual(futureFull.pct, 100);
+  assert.strictEqual(futureFull.width, 100);
+  assert.strictEqual(futureFull.cls, "");
+  const futureSpent = categoryRemainBar(10000, 100, future);
+  assert.strictEqual(futureSpent.pct, 99);
+  assert.strictEqual(futureSpent.cls, "behind");
+
+  const rounded = categoryRemainBar(3, 1, current);
+  assert.strictEqual(rounded.pct, 67);
+  assert.strictEqual(rounded.width, 67);
+  assert.strictEqual(rounded.cls, "");
+
+  assert.strictEqual(categoryRemainBar("", 500, current).pct, null);
+  assert.strictEqual(categoryRemainBar(null, 0, null).cls, "");
+}
+
 function testClockUsesTokyo() {
   const fmt = new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit"
@@ -187,7 +254,7 @@ function testIconsAndManifest() {
   assert.ok(html.includes('rel="apple-touch-icon" sizes="180x180" href="icon-180.png"'));
   assert.ok(html.includes('name="theme-color" content="#1F6B4A"'));
   const sw = fs.readFileSync(path.join(root, "sw.js"), "utf8");
-  assert.ok(sw.includes('const CACHE = "budget-app-v5"'));
+  assert.ok(sw.includes('const CACHE = "budget-app-v6"'));
   assert.ok(sw.includes("./icon-180.png"));
   assert.ok(sw.includes("./icon-192.png"));
   assert.ok(sw.includes("./icon-512.png"));
@@ -195,6 +262,14 @@ function testIconsAndManifest() {
   assert.ok(app.includes('class="record-btn"'));
   assert.ok(app.includes("月末まで残り"));
   assert.ok(app.includes('timeZone: "Asia/Tokyo"'));
+  assert.ok(app.includes("categoryRemainBar(b, s, pace)"));
+  assert.ok(!app.includes("s / b"));
+  assert.ok(html.includes("--shu: #EB6101"));
+  assert.ok(html.includes(".cat .bar.behind > i { background: var(--shu); }"));
+  const catBlock = app.slice(app.indexOf("catList.innerHTML"), app.indexOf("const exps"));
+  assert.ok(catBlock.includes("categoryRemainBar(b, s, pace)"));
+  assert.ok(!catBlock.includes("月末まで残り"));
+  assert.ok(!catBlock.includes("monthPace"));
 }
 
 testMonthLengths();
@@ -202,6 +277,7 @@ testIncludesTodayAndRounds();
 testLeapDays();
 testMonthBoundaries();
 testBudgetComparison();
+testCategoryRemainBar();
 testClockUsesTokyo();
 testIconsAndManifest();
 console.log("month pace tests passed");
