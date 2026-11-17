@@ -9,8 +9,9 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="予算管理">
   <meta name="theme-color" content="#1F6B4A">
-  <link rel="apple-touch-icon" href="icon-180.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="icon-180.png">
   <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+  <link rel="icon" type="image/png" sizes="512x512" href="icon-512.png">
   <link rel="manifest" href="manifest.webmanifest">
   <title>予算管理</title>
   <style>
@@ -58,6 +59,13 @@
     .summary .cell { background: rgba(255,255,255,0.12); border-radius: 12px; padding: 10px 12px; }
     .summary .cell span { display: block; font-size: 0.75rem; opacity: 0.85; }
     .summary .cell b { font-size: 1.05rem; font-weight: 650; }
+    .summary .pace { margin-top: 14px; display: flex; flex-direction: column; gap: 4px; }
+    .summary .pace-label { font-size: 0.86rem; letter-spacing: 0.01em; }
+    .summary .pace .bar { margin-top: 0; background: rgba(0,0,0,0.18); }
+    .summary .pace .bar + .pace-label { margin-top: 8px; }
+    .summary .pace .bar > i { background: #fff; }
+    .summary .pace .bar.warn > i { background: #F6D48A; }
+    .summary .pace .bar.danger > i { background: #FFD0CB; }
     .section { margin-top: 22px; }
     .section h2 { margin: 0 0 10px; font-size: 0.95rem; color: var(--muted); font-weight: 650; display: flex; justify-content: space-between; align-items: baseline; }
     .linkish { color: var(--accent); font-weight: 650; font-size: 0.85rem; }

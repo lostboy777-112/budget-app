@@ -38,6 +38,56 @@ function shiftMonth(ym, delta) {
   const d = new Date(Date.UTC(y, m - 1 + delta, 1));
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
 }
+function daysInMonth(ym) {
+  const [y, m] = String(ym).split("-").map(Number);
+  return new Date(Date.UTC(y, m, 0)).getUTCDate();
+}
+function monthIndex(ym) {
+  const [y, m] = String(ym).split("-").map(Number);
+  return y * 12 + m;
+}
+function monthPace(ym, today) {
+  const t = today || jstNow();
+  const total = daysInMonth(ym);
+  const todayKey = `${String(t.year).padStart(4, "0")}-${String(t.month).padStart(2, "0")}`;
+  const view = monthIndex(ym);
+  const now = monthIndex(todayKey);
+  let remaining;
+  let status;
+  if (view < now) {
+    remaining = 0;
+    status = "past";
+  } else if (view > now) {
+    remaining = total;
+    status = "future";
+  } else {
+    const day = Math.min(total, Math.max(1, Number(t.day)));
+    remaining = total - day + 1;
+    status = "current";
+  }
+  const ratio = total > 0 ? remaining / total : 0;
+  return {
+    total,
+    remaining,
+    pct: Math.round(ratio * 100),
+    status
+  };
+}
+function monthPaceLabel(pace) {
+  return `月末まで残り ${pace.remaining}日（${pace.pct}%）`;
+}
+function budgetRemainPace(totalBudget, remain, pace) {
+  if (!(totalBudget > 0)) {
+    return { text: "予算の残り 未設定", pct: null, width: 0, cls: "" };
+  }
+  const pct = Math.max(-999, Math.min(999, Math.round(remain / totalBudget * 100)));
+  const width = Math.max(0, Math.min(100, pct));
+  let cls = "";
+  if (pct < 0) cls = "danger";
+  else if (pace && pace.status === "current" && pct < pace.pct) cls = "warn";
+  const shown = pct < 0 ? `−${Math.abs(pct)}%` : `${pct}%`;
+  return { text: `予算の残り ${shown}`, pct, width, cls };
+}
 function yen(n) {
   const v = Math.round(Number(n) || 0);
   return "¥" + v.toLocaleString("ja-JP");
@@ -90,6 +140,7 @@ const state = {
   data: load(),
   sheet: null
 };
+let paceStamp = todayStr();
 
 function catName(id) {
   const c = state.data.categories.find(x => x.id === id);
@@ -132,6 +183,7 @@ function openSheet(title, bodyHtml, footerHtml) {
 }
 
 function render() {
+  paceStamp = todayStr();
   const ym = state.month;
   const budgetMap = monthBudget(ym);
   const spentMap = spentByCategory(ym);
@@ -148,6 +200,12 @@ function render() {
   }
   const remain = totalBudget - totalSpent;
   const remainCls = remain < 0 ? "over" : "";
+  const pace = monthPace(ym);
+  const budgetPace = budgetRemainPace(totalBudget, remain, pace);
+  const paceText = monthPaceLabel(pace);
+  const budgetAria = budgetPace.pct == null
+    ? 'aria-valuetext="未設定"'
+    : `aria-valuenow="${budgetPace.width}"`;
 
   $("app").innerHTML = `
     <header class="top">
@@ -164,6 +222,12 @@ function render() {
       <div class="row">
         <div class="cell"><span>今月の予算</span><b>${yen(totalBudget)}</b></div>
         <div class="cell"><span>使った金額</span><b>${yen(totalSpent)}</b></div>
+      </div>
+      <div class="pace">
+        <div class="pace-label" id="budgetPaceLabel">${escapeHtml(budgetPace.text)}</div>
+        <div class="bar ${budgetPace.cls}" id="budgetPaceBar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-label="${escapeHtml(budgetPace.text)}" ${budgetAria}><i style="width:${budgetPace.width}%"></i></div>
+        <div class="pace-label" id="monthPaceLabel">${escapeHtml(paceText)}</div>
+        <div class="bar" id="monthPaceBar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pace.pct}" aria-label="${escapeHtml(paceText)}"><i style="width:${pace.pct}%"></i></div>
       </div>
     </section>
     <section class="section">
@@ -522,18 +586,46 @@ function showSettings() {
   toast("送り直しています");
 }
 
-$("scrim").onclick = closeSheet;
-render();
-BudgetSync.flush(localStorage, window.fetch.bind(window)).then(refreshSyncStatus);
-window.addEventListener("online", () => {
+function msUntilNextJstDay() {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Tokyo",
+    hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23"
+  }).formatToParts(new Date());
+  const g = (type) => Number(parts.find((p) => p.type === type).value);
+  let hour = g("hour");
+  if (hour === 24) hour = 0;
+  return ((23 - hour) * 3600 + (59 - g("minute")) * 60 + (60 - g("second"))) * 1000 + 250;
+}
+function refreshPaceIfDateChanged() {
+  if (todayStr() === paceStamp) return;
+  render();
+}
+function schedulePaceRefresh() {
+  setTimeout(() => {
+    render();
+    schedulePaceRefresh();
+  }, msUntilNextJstDay());
+}
+function boot() {
+  $("scrim").onclick = closeSheet;
+  render();
   BudgetSync.flush(localStorage, window.fetch.bind(window)).then(refreshSyncStatus);
-});
-document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible") {
+  window.addEventListener("online", () => {
     BudgetSync.flush(localStorage, window.fetch.bind(window)).then(refreshSyncStatus);
+  });
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState !== "visible") return;
+    BudgetSync.flush(localStorage, window.fetch.bind(window)).then(refreshSyncStatus);
+    refreshPaceIfDateChanged();
+  });
+  if ("serviceWorker" in navigator) {
+    navigator.serviceWorker.register("./sw.js").catch(() => {});
   }
-});
+  schedulePaceRefresh();
+}
 
-if ("serviceWorker" in navigator) {
-  navigator.serviceWorker.register("./sw.js").catch(() => {});
+if (typeof document !== "undefined" && document.getElementById("scrim")) boot();
+
+if (typeof module !== "undefined" && module.exports) {
+  module.exports = { daysInMonth, monthPace, monthPaceLabel, budgetRemainPace, jstNow, shiftMonth };
 }

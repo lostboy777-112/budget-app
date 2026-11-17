@@ -434,7 +434,7 @@ function testSheets() {
 
 async function testRepoHasNoSecrets() {
   const files = [
-    "index.html", "app.js", "sync.js", "sw.js", "README.md", "gas/Code.gs", "gas/SETUP.md", "manifest.webmanifest"
+    "index.html", "app.js", "sync.js", "sw.js", "README.md", "gas/Code.gs", "gas/SETUP.md", "manifest.webmanifest", "icon.svg"
   ];
   const banned = [/ghp_[A-Za-z0-9]/, /github_pat_[A-Za-z0-9]/, /AIza[0-9A-Za-z_-]{20}/, /SYNC_TOKEN\s*[:=]\s*["'][^"']+["']/];
   for (const file of files) {
@@ -454,7 +454,7 @@ async function testRepoHasNoSecrets() {
   assert.ok(app.includes("escapeHtml(c.id)"));
   assert.ok(app.includes("sanitizeImport"));
   const sw = fs.readFileSync(path.join(__dirname, "../sw.js"), "utf8");
-  assert.ok(sw.includes('const CACHE = "budget-app-v4"'));
+  assert.ok(sw.includes('const CACHE = "budget-app-v5"'));
   assert.ok(sw.includes("./sync.js"));
   assert.ok(sw.includes("./app.js"));
 }
