@@ -192,6 +192,35 @@ function openSheet(title, bodyHtml, footerHtml) {
   $("sheet").classList.add("on");
   $("scrim").classList.add("on");
 }
+function scrollHomeToTop() {
+  // Mobile Chrome scrolls the document. An installed iPhone app may scroll
+  // the body or an inner element instead, and can put the old offset back
+  // when the keyboard closes, so reset each of them now and once more shortly after.
+  const active = document.activeElement;
+  if (active && active !== document.body && typeof active.blur === "function") active.blur();
+  const apply = () => {
+    const seen = new Set();
+    const reset = (el) => {
+      if (!el || seen.has(el)) return;
+      seen.add(el);
+      try {
+        el.scrollTop = 0;
+        if (typeof el.scrollTo === "function") el.scrollTo(0, 0);
+      } catch (e) {}
+    };
+    reset(document.scrollingElement);
+    reset(document.documentElement);
+    reset(document.body);
+    reset($("app"));
+    document.querySelectorAll("body *").forEach((el) => {
+      if (el.scrollTop) reset(el);
+    });
+    try { window.scrollTo(0, 0); } catch (e) {}
+  };
+  apply();
+  requestAnimationFrame(apply);
+  setTimeout(apply, 300);
+}
 
 function render() {
   paceStamp = todayStr();
@@ -361,6 +390,7 @@ function showExpense(existing, presetCategoryId) {
     enqueueSync([BudgetSync.expenseUpsert(item, catName(categoryId), updatedAt)]);
     closeSheet();
     render();
+    if (!existing) scrollHomeToTop();
     toast(existing ? "支出を更新しました" : "支出を記録しました");
   };
   const cancel = $("cancelSheet");

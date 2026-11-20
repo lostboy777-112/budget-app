@@ -254,7 +254,7 @@ function testIconsAndManifest() {
   assert.ok(html.includes('rel="apple-touch-icon" sizes="180x180" href="icon-180.png"'));
   assert.ok(html.includes('name="theme-color" content="#1F6B4A"'));
   const sw = fs.readFileSync(path.join(root, "sw.js"), "utf8");
-  assert.ok(sw.includes('const CACHE = "budget-app-v6"'));
+  assert.ok(sw.includes('const CACHE = "budget-app-v7"'));
   assert.ok(sw.includes("./icon-180.png"));
   assert.ok(sw.includes("./icon-192.png"));
   assert.ok(sw.includes("./icon-512.png"));
@@ -272,6 +272,24 @@ function testIconsAndManifest() {
   assert.ok(!catBlock.includes("monthPace"));
 }
 
+function testScrollAfterNewExpense() {
+  const app = fs.readFileSync(path.join(__dirname, "..", "app.js"), "utf8");
+  assert.strictEqual((app.match(/scrollHomeToTop\(\)/g) || []).length, 2);
+  assert.ok(app.includes("if (!existing) scrollHomeToTop();"));
+  const fn = app.slice(app.indexOf("function scrollHomeToTop"), app.indexOf("function render"));
+  assert.ok(fn.startsWith("function scrollHomeToTop"));
+  assert.ok(fn.includes("document.scrollingElement"));
+  assert.ok(fn.includes("document.documentElement"));
+  assert.ok(fn.includes("document.body"));
+  assert.ok(fn.includes('$("app")'));
+  assert.ok(fn.includes("el.scrollTop"));
+  assert.ok(fn.includes("window.scrollTo(0, 0)"));
+  const saveBlock = app.slice(app.indexOf("const delBtn"), app.indexOf("function showBudgets"));
+  assert.strictEqual((saveBlock.match(/scrollHomeToTop\(\)/g) || []).length, 1);
+  const deleteBlock = app.slice(app.indexOf("if (del) del.onclick"), app.indexOf("function showBudgets"));
+  assert.ok(!deleteBlock.includes("scrollHomeToTop"));
+}
+
 testMonthLengths();
 testIncludesTodayAndRounds();
 testLeapDays();
@@ -280,4 +298,5 @@ testBudgetComparison();
 testCategoryRemainBar();
 testClockUsesTokyo();
 testIconsAndManifest();
+testScrollAfterNewExpense();
 console.log("month pace tests passed");

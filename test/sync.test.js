@@ -454,7 +454,7 @@ async function testRepoHasNoSecrets() {
   assert.ok(app.includes("escapeHtml(c.id)"));
   assert.ok(app.includes("sanitizeImport"));
   const sw = fs.readFileSync(path.join(__dirname, "../sw.js"), "utf8");
-  assert.ok(sw.includes('const CACHE = "budget-app-v6"'));
+  assert.ok(sw.includes('const CACHE = "budget-app-v7"'));
   assert.ok(sw.includes("./sync.js"));
   assert.ok(sw.includes("./app.js"));
 }
